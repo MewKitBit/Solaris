@@ -14,4 +14,5 @@ This stateful component is written in both Python and Rust.
 
 ## Info
 This project is powered by the PVLib engine.
-![Solaris_Workflow diagram](https://github.com/MewKitBit/Solaris/blob/master/Media/pvlib_powered_logo_horiz.webp)
+
+<img src="https://github.com/MewKitBit/Solaris/blob/master/Media/pvlib_powered_logo_horiz.webp" width="300">
