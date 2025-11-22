@@ -11,3 +11,7 @@ Here is a quick diagram showing the workflow:
 This stateful component is written in both Python and Rust.
 - **Why Python?**: Because it's the language PVLib is written in and I know it well.
 - **Why Rust?**: Because I want to learn Rust and porting this is a good first contact.
+
+## Info
+This project is powered by the PVLib engine.
+![Solaris_Workflow diagram](https://github.com/MewKitBit/Solaris/blob/master/Media/pvlib_powered_logo_horiz.webp)
