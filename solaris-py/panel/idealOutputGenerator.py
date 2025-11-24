@@ -1,9 +1,10 @@
 from enum import Enum
 from pandas import DataFrame
-from pvlib import pvsystem, irradiance, temperature
+from pvlib import pvsystem, irradiance, temperature, solarposition, atmosphere, iam
 from pvlib.location import Location
 from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
 
+# TODO: Add logging to the generator
 import logging
 logger = logging.getLogger("idealOutputGenerator")
 
@@ -17,73 +18,154 @@ class TemperatureModel(Enum):
     PVSYST_INSULATED = TEMPERATURE_MODEL_PARAMETERS['pvsyst']['insulated']
     PVSYST_SEMI_INTEGRATED = TEMPERATURE_MODEL_PARAMETERS['pvsyst']['semi_integrated']
 
+class IrradianceModel(Enum):
+    """Valid irradiance simulation models for PVLib"""
+    ISOTROPIC = 'isotropic'
+    KLUCHER = 'klucher'
+    HAYDAVIES = 'haydavies'
+    REINDL = 'reindl'
+    KING = 'king'
+    PEREZ = 'perez'
+    PEREZ_DRIESSE = 'perez - driesse'
+
+class ModuleSource(Enum):
+    """Valid module sources for PVLib"""
+    CEC = 'CECMod'
+    SANDIA = 'SandiaMod'
+
 class IdealOutputGenerator :
     """Calculates the 'ideal' power for one module."""
-    sandia_modules_db = pvsystem.retrieve_sam('SandiaMod')
+    sandia_modules_db = pvsystem.retrieve_sam(ModuleSource.SANDIA.value)
+    cec_modules_db = pvsystem.retrieve_sam(ModuleSource.CEC.value)
 
-    def __init__(self, location: Location, mount: pvsystem.FixedMount, module_name: str, temp_model: TemperatureModel):
+    def __init__(self, location: Location, azimuth: float, tilt: float, temp_model: TemperatureModel,
+                 irradiance_model: IrradianceModel, albedo: float, module: str = None,
+                 module_source: ModuleSource = None):
         self.location = location
-        self.mount = mount
-        self.module_params = IdealOutputGenerator.sandia_modules_db[module_name]
-        self.temp_params = temp_model
-        # TODO: Could include albedo in the future for more granular control. For now left at default PVLib 0.25
-        self.albedo = 0.25
-        self.irradiance = None
-        self.temperature = None
+        self.azimuth = azimuth
+        self.tilt = tilt
+        self.temp_params = temp_model.value
+        self.irradiance_model = irradiance_model.value
+        self.albedo = albedo
+        self.module = module
+        self.module_source = module_source.value
+        self.output_file = None
+        self.sim_parameters = None
+        self.solar_pos = None
+        self.total_irradiance = None
+        self.cell_temperature = None
         self.ideal_power = None
 
-    def calculate_irradiance(self, weather, solpos):
-        self.irradiance = irradiance.get_total_irradiance(
-            surface_tilt=self.mount.surface_tilt,
-            surface_azimuth=self.mount.surface_azimuth,
-            solar_zenith=solpos['apparent_zenith'],
-            solar_azimuth=solpos['azimuth'],
-            dni=weather['dni'],
-            ghi=weather['ghi'],
-            dhi=weather['dhi'],
-            albedo=self.albedo
+        # Load module if defined
+        if module_source is ModuleSource.SANDIA:
+            self.module = IdealOutputGenerator.sandia_modules_db[module]
+        elif module_source is ModuleSource.CEC:
+            self.module = IdealOutputGenerator.cec_modules_db[module]
+        else:
+            self.module = None
+
+
+    def __complete_weather(self):
+        """
+        Adds the following values to the weather dataframe if not present:
+            - dni_extra
+            - airmass
+            - am_abs
+        """
+        if 'dni_extra' not in self.sim_parameters.columns:
+            dni_extra = irradiance.get_extra_radiation(self.sim_parameters.index)
+            self.sim_parameters['dni_extra'] = dni_extra
+        if 'airmass' not in self.sim_parameters.columns:
+            airmass = atmosphere.get_relative_airmass(self.solar_pos['apparent_zenith'])
+            self.sim_parameters['airmass'] = airmass
+        if 'am_abs' not in self.sim_parameters.columns:
+            am_abs = atmosphere.get_absolute_airmass(self.sim_parameters['airmass'], self.sim_parameters['pressure'])
+            self.sim_parameters['am_abs'] = am_abs
+
+    def __operate_common_data(self, weather: DataFrame, output_file: str):
+        if not output_file.endswith(".csv"):
+            output_file += ".csv"
+
+        # Overwrite with fresh weather data
+        self.sim_parameters = weather.copy()
+
+        if 'pressure' not in self.sim_parameters.columns:
+            pressure = atmosphere.alt2pres(self.location.altitude)
+            self.sim_parameters['pressure'] = pressure
+
+        # Calculate solar position
+        self.solar_pos = solarposition.get_solarposition(
+            time=self.sim_parameters.index,
+            latitude=self.location.latitude,
+            longitude=self.location.longitude,
+            altitude=self.location.altitude,
+            temperature=self.sim_parameters["temp_air"],
+            pressure=self.sim_parameters["pressure"],
         )
 
-    def calculate_temperature(self, weather):
-        self.temperature = temperature.sapm_cell(
-            poa_global=self.irradiance['poa_global'],
-            temp_air=weather['temp_air'],
-            wind_speed=weather['wind_speed'],
-            **self.temp_params  # Unpack the temp model dict
+        # Calculate extra weather parameters if not available
+        self.__complete_weather()
+
+        total_irradiance = irradiance.get_total_irradiance(
+            self.tilt,
+            self.azimuth,
+            self.solar_pos['apparent_zenith'],
+            self.solar_pos['azimuth'],
+            self.sim_parameters['dni'],
+            self.sim_parameters['ghi'],
+            self.sim_parameters['dhi'],
+            dni_extra=self.sim_parameters['dni_extra'],
+            airmass=self.sim_parameters['airmass'],
+            albedo=self.albedo,
+            model=self.irradiance_model,
         )
 
-    def calculate_power(self):
-        self.ideal_power = pvsystem.pvwatts_dc(
-            effective_irradiance=self.irradiance['poa_global'],
-            temp_cell=self.temperature,
-            pdc0=self.module_params['pdc0'],
-            gamma_pdc=self.module_params['gamma_pdc']
-        )
+        self.total_irradiance = total_irradiance
 
-    def generate_output(self, weather: DataFrame, solpos: DataFrame, output_file: str):
+        if self.temp_params not in [TemperatureModel.PVSYST_INSULATED, TemperatureModel.PVSYST_SEMI_INTEGRATED,
+                                       TemperatureModel.PVSYST_FREESTANDING]:
+            cell_temperature = temperature.sapm_cell(
+                total_irradiance['poa_global'],
+                self.sim_parameters["temp_air"],
+                self.sim_parameters["wind_speed"],
+                **self.temp_params,
+            )
+
+        else:
+            cell_temperature = temperature.pvsyst_cell(
+                poa_global=total_irradiance['poa_global'],
+                temp_air=self.sim_parameters["temp_air"],
+                wind_speed=self.sim_parameters["wind_speed"],
+                u_c=self.temp_params['u_c'],
+                u_v=self.temp_params['u_v'],
+                module_efficiency=,
+                alpha_absorption=
+            )
+
+        self.cell_temperature = cell_temperature
+
+    def generate_ideal_output(self, weather: DataFrame, output_file: str, max_wattage: float, gamma_pdc: float):
         """
         Runs the core physics using the provided weather and solpos dataframes.
 
         Args:
             weather (Series): Weather data series.
-            solpos (Series): Solar position data series.
             output_file (str): Name/path of file where output will be written.
+            max_wattage (float): Maximum wattage of ideal panel.
+            gamma_pdc (float): Percentage loss per Cº
         """
-        if weather.len() != solpos.len():
-            raise ValueError("Weather length does not match solar position data length.")
+        self.__operate_common_data(weather, output_file)
 
-        if not output_file.endswith(".csv"):
-            output_file += ".csv"
-
-        # Get irradiance on the panel
-        self.calculate_irradiance(weather, solpos)
-        # Get cell temperature
-        self.calculate_temperature(weather)
-        # Calculate ideal DC power
-        self.calculate_power()
+        self.ideal_power = pvsystem.pvwatts_dc(
+            self.total_irradiance['poa_global'],
+            self.cell_temperature,
+            module_pdc0=max_wattage,
+            gamma_pdc=gamma_pdc
+        )
 
         # Save to file
         self.ideal_power.to_csv(
             output_file,
             header=True,
         )
+        
