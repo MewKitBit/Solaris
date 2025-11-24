@@ -35,9 +35,6 @@ class ModuleSource(Enum):
 
 class IdealOutputGenerator :
     """Calculates the 'ideal' power for one module."""
-    sandia_modules_db = pvsystem.retrieve_sam(ModuleSource.SANDIA.value)
-    cec_modules_db = pvsystem.retrieve_sam(ModuleSource.CEC.value)
-
     def __init__(self, location: Location, azimuth: float, tilt: float, temp_model: TemperatureModel,
                  irradiance_model: IrradianceModel, albedo: float, module: str = None,
                  module_source: ModuleSource = None):
@@ -45,6 +42,7 @@ class IdealOutputGenerator :
         self.azimuth = azimuth
         self.tilt = tilt
         self.temp_params = temp_model.value
+        self.temp_model = temp_model
         self.irradiance_model = irradiance_model.value
         self.albedo = albedo
         self.module = module
@@ -52,9 +50,11 @@ class IdealOutputGenerator :
 
         # Load module if defined
         if module_source is ModuleSource.SANDIA:
-            self.module = IdealOutputGenerator.sandia_modules_db[module]
+            sandia_modules_db = pvsystem.retrieve_sam(ModuleSource.SANDIA.value)
+            self.module = sandia_modules_db[module]
         elif module_source is ModuleSource.CEC:
-            self.module = IdealOutputGenerator.cec_modules_db[module]
+            cec_modules_db = pvsystem.retrieve_sam(ModuleSource.CEC.value)
+            self.module = cec_modules_db[module]
         else:
             self.module = None
         
@@ -124,7 +124,7 @@ class IdealOutputGenerator :
 
         self.total_irradiance = total_irradiance
 
-        if self.temp_params not in [TemperatureModel.PVSYST_INSULATED, TemperatureModel.PVSYST_SEMI_INTEGRATED,
+        if self.temp_model not in [TemperatureModel.PVSYST_INSULATED, TemperatureModel.PVSYST_SEMI_INTEGRATED,
                                        TemperatureModel.PVSYST_FREESTANDING]:
             cell_temperature = temperature.sapm_cell(
                 total_irradiance['poa_global'],
@@ -140,11 +140,14 @@ class IdealOutputGenerator :
                 wind_speed=self.sim_parameters["wind_speed"],
                 u_c=self.temp_params['u_c'],
                 u_v=self.temp_params['u_v'],
-                module_efficiency=,
-                alpha_absorption=
             )
 
         self.cell_temperature = cell_temperature
+
+        aoi = irradiance.aoi(self.tilt, self.azimuth,
+                             self.solar_pos['apparent_zenith'],
+                             self.solar_pos['azimuth'])
+        self.sim_parameters['aoi'] = aoi
 
     def generate_ideal_output(self, weather: DataFrame, output_file: str, max_wattage: float, gamma_pdc: float):
         """
@@ -154,7 +157,7 @@ class IdealOutputGenerator :
             weather (Series): Weather data series.
             output_file (str): Name/path of file where output will be written.
             max_wattage (float): Maximum wattage of ideal panel.
-            gamma_pdc (float): Percentage loss per Cº
+            gamma_pdc (float): Percentage loss per Cº (i.e. -0.04 for 4%)
         """
         self.__operate_common_data(weather, output_file)
 
@@ -191,8 +194,8 @@ class IdealOutputGenerator :
             spectral_loss = 1.0
 
             # 3. Construct Effective Irradiance
-            effective_irradiance = ((self.total_irradiance['poa_direct'] * iam + self.total_irradiance['poa_diffuse'])
-                                    * spectral_loss)
+            effective_irradiance = ((self.total_irradiance['poa_direct'] * iam_val +
+                                     self.total_irradiance['poa_diffuse']) * spectral_loss)
 
             il, i0, rs, rsh, nNsVth = pvsystem.calcparams_cec(
                 effective_irradiance=effective_irradiance,
