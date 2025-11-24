@@ -9,10 +9,13 @@ logger = logging.getLogger("idealOutputGenerator")
 
 class TemperatureModel(Enum):
     """Valid temperature models for PVLib"""
-    OPEN_RACK_GLASS = 'open_rack_glass_glass'
-    CLOSE_MOUNT_GLASS = 'close_mount_glass_glass'
-    OPEN_RACK_POLYMER = 'open_rack_glass_polymer'
-    INSULATED_BACK_POLYMER = 'insulated_back_glass_polymer'
+    SAPM_OPEN_RACK_GLASS = TEMPERATURE_MODEL_PARAMETERS['sapm']['open_rack_glass_glass']
+    SAPM_CLOSE_MOUNT_GLASS = TEMPERATURE_MODEL_PARAMETERS['sapm']['close_mount_glass_glass']
+    SAPM_OPEN_RACK_POLYMER = TEMPERATURE_MODEL_PARAMETERS['sapm']['open_rack_glass_polymer']
+    SAPM_INSULATED_BACK_POLYMER = TEMPERATURE_MODEL_PARAMETERS['sapm']['insulated_back_glass_polymer']
+    PVSYST_FREESTANDING = TEMPERATURE_MODEL_PARAMETERS['pvsyst']['freestanding']
+    PVSYST_INSULATED = TEMPERATURE_MODEL_PARAMETERS['pvsyst']['insulated']
+    PVSYST_SEMI_INTEGRATED = TEMPERATURE_MODEL_PARAMETERS['pvsyst']['semi_integrated']
 
 class IdealOutputGenerator :
     """Calculates the 'ideal' power for one module."""
@@ -22,7 +25,7 @@ class IdealOutputGenerator :
         self.location = location
         self.mount = mount
         self.module_params = IdealOutputGenerator.sandia_modules_db[module_name]
-        self.temp_params = TEMPERATURE_MODEL_PARAMETERS['sapm'][temp_model]
+        self.temp_params = temp_model
         # TODO: Could include albedo in the future for more granular control. For now left at default PVLib 0.25
         self.albedo = 0.25
         self.irradiance = None
@@ -56,6 +59,7 @@ class IdealOutputGenerator :
             pdc0=self.module_params['pdc0'],
             gamma_pdc=self.module_params['gamma_pdc']
         )
+
     def generate_output(self, weather: DataFrame, solpos: DataFrame, output_file: str):
         """
         Runs the core physics using the provided weather and solpos dataframes.
