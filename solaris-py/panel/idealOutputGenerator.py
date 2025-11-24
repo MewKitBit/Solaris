@@ -46,7 +46,7 @@ class IdealOutputGenerator :
         self.irradiance_model = irradiance_model.value
         self.albedo = albedo
         self.module = module
-        self.module_source = module_source.value
+        self.module_source = module_source
 
         # Load module if defined
         if module_source is ModuleSource.SANDIA:
