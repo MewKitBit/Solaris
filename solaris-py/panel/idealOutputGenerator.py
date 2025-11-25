@@ -51,10 +51,16 @@ class IdealOutputGenerator :
         # Load module if defined
         if module_source is ModuleSource.SANDIA:
             sandia_modules_db = pvsystem.retrieve_sam(ModuleSource.SANDIA.value)
-            self.module = sandia_modules_db[module]
+            if module in sandia_modules_db.keys():
+                logger.debug(f'Loaded Sandia module {module}')
+                self.module = sandia_modules_db[module]
+            else:
+                logger.debug(f'No Sandia module {module}')
         elif module_source is ModuleSource.CEC:
             cec_modules_db = pvsystem.retrieve_sam(ModuleSource.CEC.value)
-            self.module = cec_modules_db[module]
+            if module in cec_modules_db.keys():
+                logger.debug(f'Loaded CEC module {module}')
+                self.module = cec_modules_db[module]
         else:
             self.module = None
         
@@ -108,6 +114,7 @@ class IdealOutputGenerator :
         # Calculate extra weather parameters if not available
         self.__complete_weather()
 
+        # Assign total irradiance
         total_irradiance = irradiance.get_total_irradiance(
             self.tilt,
             self.azimuth,
@@ -124,6 +131,7 @@ class IdealOutputGenerator :
 
         self.total_irradiance = total_irradiance
 
+        # Assign cell temperatures
         if self.temp_model not in [TemperatureModel.PVSYST_INSULATED, TemperatureModel.PVSYST_SEMI_INTEGRATED,
                                        TemperatureModel.PVSYST_FREESTANDING]:
             cell_temperature = temperature.sapm_cell(
