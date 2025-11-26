@@ -52,18 +52,18 @@ class IdealOutputGenerator :
         if module_source is ModuleSource.SANDIA:
             sandia_modules_db = pvsystem.retrieve_sam(ModuleSource.SANDIA.value)
             if module in sandia_modules_db.keys():
-                logger.debug(f'Loaded Sandia module {module}')
+                logger.info(f'Loaded Sandia module {module}')
                 self.module = sandia_modules_db[module]
             else:
-                logger.debug(f'No Sandia module {module}')
+                logger.error(f'No Sandia module {module}, none loaded')
         elif module_source is ModuleSource.CEC:
             cec_modules_db = pvsystem.retrieve_sam(ModuleSource.CEC.value)
             if module in cec_modules_db.keys():
                 logger.debug(f'Loaded CEC module {module}')
                 self.module = cec_modules_db[module]
-        else:
-            self.module = None
-        
+            else:
+                logger.error(f'No CEC module {module}, none loaded')
+
         # State storage
         self.output_file = None
         self.sim_parameters = None
@@ -71,7 +71,6 @@ class IdealOutputGenerator :
         self.total_irradiance = None
         self.cell_temperature = None
         self.ideal_power = None
-
 
     def __complete_weather(self):
         """
@@ -83,12 +82,15 @@ class IdealOutputGenerator :
         if 'dni_extra' not in self.sim_parameters.columns:
             dni_extra = irradiance.get_extra_radiation(self.sim_parameters.index)
             self.sim_parameters['dni_extra'] = dni_extra
+            logger.info(f'Adding dni_extra column')
         if 'airmass' not in self.sim_parameters.columns:
             airmass = atmosphere.get_relative_airmass(self.solar_pos['apparent_zenith'])
             self.sim_parameters['airmass'] = airmass
+            logger.info(f'Adding airnass column')
         if 'am_abs' not in self.sim_parameters.columns:
             am_abs = atmosphere.get_absolute_airmass(self.sim_parameters['airmass'], self.sim_parameters['pressure'])
             self.sim_parameters['am_abs'] = am_abs
+            logger.info(f'Adding am_abs column')
 
     def __operate_common_data(self, weather: DataFrame, output_file: str):
         if not output_file.endswith(".csv"):
@@ -97,6 +99,7 @@ class IdealOutputGenerator :
         # Overwrite with fresh weather data
         self.sim_parameters = weather.copy()
 
+        # Pressure is needed for the solar position, so operate it before.
         if 'pressure' not in self.sim_parameters.columns:
             pressure = atmosphere.alt2pres(self.location.altitude)
             self.sim_parameters['pressure'] = pressure
