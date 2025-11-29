@@ -217,9 +217,7 @@ class IdealOutputGenerator :
                 I_o_ref=self.module['I_o_ref'],
                 R_sh_ref=self.module['R_sh_ref'],
                 R_s=self.module['R_s'],
-                Adjust=self.module['Adjust'],
-                EgRef=1.121,  # Band gap for silicon
-                dEgdT=-0.0002677  # Temp coeff for band gap
+                Adjust=self.module['Adjust']
             )
 
             full_results = pvsystem.singlediode(
