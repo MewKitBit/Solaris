@@ -188,7 +188,7 @@ class IdealOutputGenerator :
     def __generate_cec_output(self):
         # 1. Reflection (IAM)
         # Using ASHRAE model (standard for generic glass)
-        iam_val = iam.ashrae(self.sim_parameters['aoi'], b=0.05)
+        iam_val = iam.ashrae(self.sim_parameters['aoi'])
 
         # 2. Spectrum
         # Assuming ideal spectrum (1.0) since we likely lack precipitable_water data
