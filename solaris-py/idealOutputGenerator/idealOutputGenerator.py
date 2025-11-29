@@ -185,7 +185,7 @@ class IdealOutputGenerator :
             header=True,
         )
 
-    def __generate_cec_output(self, weather: DataFrame):
+    def __generate_cec_output(self):
         # 1. Reflection (IAM)
         # Using ASHRAE model (standard for generic glass)
         iam_val = iam.ashrae(self.sim_parameters['aoi'], b=0.05)
@@ -222,7 +222,7 @@ class IdealOutputGenerator :
 
         return full_results
 
-    def __generate_sapm_output(self, weather: DataFrame):
+    def __generate_sapm_output(self):
         effective_irradiance = pvsystem.sapm_effective_irradiance(
             self.total_irradiance['poa_direct'],
             self.total_irradiance['poa_diffuse'],
@@ -243,10 +243,10 @@ class IdealOutputGenerator :
         self.__operate_common_data(weather, output_file)
 
         if self.module_source is ModuleSource.CEC:
-            full_results = self.__generate_cec_output(weather)
+            full_results = self.__generate_cec_output()
 
         else:
-            full_results = self.__generate_sapm_output(weather)
+            full_results = self.__generate_sapm_output()
 
         self.ideal_power = full_results['p_mp']
 
