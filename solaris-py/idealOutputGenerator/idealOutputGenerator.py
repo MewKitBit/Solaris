@@ -185,6 +185,53 @@ class IdealOutputGenerator :
             header=True,
         )
 
+    def __generate_cec_output(self, weather: DataFrame):
+        # 1. Reflection (IAM)
+        # Using ASHRAE model (standard for generic glass)
+        iam_val = iam.ashrae(self.sim_parameters['aoi'], b=0.05)
+
+        # 2. Spectrum
+        # Assuming ideal spectrum (1.0) since we likely lack precipitable_water data
+        spectral_loss = 1.0
+
+        # 3. Construct Effective Irradiance
+        effective_irradiance = ((self.total_irradiance['poa_direct'] * iam_val +
+                                 self.total_irradiance['poa_diffuse']) * spectral_loss)
+
+        il, i0, rs, rsh, nNsVth = pvsystem.calcparams_cec(
+            effective_irradiance=effective_irradiance,
+            temp_cell=self.cell_temperature,
+            alpha_sc=self.module['alpha_sc'],
+            a_ref=self.module['a_ref'],
+            I_L_ref=self.module['I_L_ref'],
+            I_o_ref=self.module['I_o_ref'],
+            R_sh_ref=self.module['R_sh_ref'],
+            R_s=self.module['R_s'],
+            Adjust=self.module['Adjust']
+        )
+
+        full_results = pvsystem.singlediode(
+            photocurrent=il,
+            saturation_current=i0,
+            resistance_series=rs,
+            resistance_shunt=rsh,
+            nNsVth=nNsVth,
+            # TODO: Accept all other methods
+            method='lambertw'  # Standard robust solver
+        )
+
+        return full_results
+
+    def __generate_sapm_output(self, weather: DataFrame):
+        effective_irradiance = pvsystem.sapm_effective_irradiance(
+            self.total_irradiance['poa_direct'],
+            self.total_irradiance['poa_diffuse'],
+            self.sim_parameters['am_abs'],
+            self.sim_parameters['aoi'],
+            self.module,
+        )
+        return pvsystem.sapm(effective_irradiance, self.cell_temperature, self.module)
+
     def generate_module_output(self, weather: DataFrame, output_file: str):
         """
         Runs the core physics using the provided weather and solpos dataframes.
@@ -196,49 +243,10 @@ class IdealOutputGenerator :
         self.__operate_common_data(weather, output_file)
 
         if self.module_source is ModuleSource.CEC:
-            # 1. Reflection (IAM)
-            # Using ASHRAE model (standard for generic glass)
-            iam_val = iam.ashrae(self.sim_parameters['aoi'], b=0.05)
-
-            # 2. Spectrum
-            # Assuming ideal spectrum (1.0) since we likely lack precipitable_water data
-            spectral_loss = 1.0
-
-            # 3. Construct Effective Irradiance
-            effective_irradiance = ((self.total_irradiance['poa_direct'] * iam_val +
-                                     self.total_irradiance['poa_diffuse']) * spectral_loss)
-
-            il, i0, rs, rsh, nNsVth = pvsystem.calcparams_cec(
-                effective_irradiance=effective_irradiance,
-                temp_cell=self.cell_temperature,
-                alpha_sc=self.module['alpha_sc'],
-                a_ref=self.module['a_ref'],
-                I_L_ref=self.module['I_L_ref'],
-                I_o_ref=self.module['I_o_ref'],
-                R_sh_ref=self.module['R_sh_ref'],
-                R_s=self.module['R_s'],
-                Adjust=self.module['Adjust']
-            )
-
-            full_results = pvsystem.singlediode(
-                photocurrent=il,
-                saturation_current=i0,
-                resistance_series=rs,
-                resistance_shunt=rsh,
-                nNsVth=nNsVth,
-                # TODO: Accept all other methods
-                method='lambertw' # Standard robust solver
-            )
+            full_results = self.__generate_cec_output(weather)
 
         else:
-            effective_irradiance = pvsystem.sapm_effective_irradiance(
-                self.total_irradiance['poa_direct'],
-                self.total_irradiance['poa_diffuse'],
-                self.sim_parameters['am_abs'],
-                self.sim_parameters['aoi'],
-                self.module,
-            )
-            full_results = pvsystem.sapm(effective_irradiance, self.cell_temperature, self.module)
+            full_results = self.__generate_sapm_output(weather)
 
         self.ideal_power = full_results['p_mp']
 
