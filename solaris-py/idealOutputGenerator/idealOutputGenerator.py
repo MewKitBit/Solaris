@@ -186,17 +186,38 @@ class IdealOutputGenerator :
         )
 
     def __generate_cec_output(self):
-        # 1. Reflection (IAM)
-        # Using ASHRAE model (standard for generic glass)
-        iam_val = iam.ashrae(self.sim_parameters['aoi'])
+        # Define the keys required for the physical model
+        physical_params = ['n_glass', 'K_glass', 'L_glass']
 
-        # 2. Spectrum
-        # Assuming ideal spectrum (1.0) since we likely lack precipitable_water data
-        spectral_loss = 1.0
+        # Check if all required physical parameters exist in the module definition
+        if all(key in self.module for key in physical_params):
+            logger.info(f"Using Physical IAM model for {self.module.get('Name', 'Unknown Module')}")
 
-        # 3. Construct Effective Irradiance
-        effective_irradiance = ((self.total_irradiance['poa_direct'] * iam_val +
-                                 self.total_irradiance['poa_diffuse']) * spectral_loss)
+            # Use the physical model (Fresnel + Beer-Lambert)
+            iam_factor = iam.physical(
+                self.sim_parameters['aoi'],
+                n=self.module['n_glass'],
+                K=self.module['K_glass'],
+                L=self.module['L_glass']
+            )
+
+            iam_diffuse_factor = iam.physical(
+                aoi=59,
+                n=self.module['n_glass'],
+                K=self.module['K_glass'],
+                L=self.module['L_glass']
+            )
+        else:
+            logger.debug("Physical optical parameters missing. Falling back to ASHRAE IAM model.")
+
+            # Fallback to standard empirical model (b=0.05 is standard for flat glass)
+            iam_factor = iam.ashrae(self.sim_parameters['aoi'], b=0.05)
+            iam_diffuse_factor = iam.ashrae(59, b=0.05)
+
+        effective_irradiance = (
+                self.total_irradiance['poa_direct'] * iam_factor +
+                self.total_irradiance['poa_diffuse'] * iam_diffuse_factor
+        )
 
         il, i0, rs, rsh, nNsVth = pvsystem.calcparams_cec(
             effective_irradiance=effective_irradiance,
@@ -215,9 +236,7 @@ class IdealOutputGenerator :
             saturation_current=i0,
             resistance_series=rs,
             resistance_shunt=rsh,
-            nNsVth=nNsVth,
-            # TODO: Accept all other methods
-            method='lambertw'  # Standard robust solver
+            nNsVth=nNsVth
         )
 
         return full_results
