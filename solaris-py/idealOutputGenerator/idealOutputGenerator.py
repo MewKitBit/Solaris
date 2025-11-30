@@ -170,7 +170,7 @@ class IdealOutputGenerator :
         self.__complete_sim_params()
 
         # Assign total irradiance
-        total_irradiance = irradiance.get_total_irradiance(
+        self.total_irradiance = irradiance.get_total_irradiance(
             self.tilt,
             self.azimuth,
             self.solar_pos['apparent_zenith'],
@@ -184,13 +184,11 @@ class IdealOutputGenerator :
             model=self.irradiance_model,
         )
 
-        self.total_irradiance = total_irradiance
-
         # Assign cell temperatures
         if self.temp_model not in [TemperatureModel.PVSYST_INSULATED, TemperatureModel.PVSYST_SEMI_INTEGRATED,
                                        TemperatureModel.PVSYST_FREESTANDING]:
             cell_temperature = temperature.sapm_cell(
-                total_irradiance['poa_global'],
+                self.total_irradiance['poa_global'],
                 self.sim_parameters["temp_air"],
                 self.sim_parameters["wind_speed"],
                 **self.temp_params,
@@ -198,7 +196,7 @@ class IdealOutputGenerator :
 
         else:
             cell_temperature = temperature.pvsyst_cell(
-                poa_global=total_irradiance['poa_global'],
+                poa_global=self.total_irradiance['poa_global'],
                 temp_air=self.sim_parameters["temp_air"],
                 wind_speed=self.sim_parameters["wind_speed"],
                 u_c=self.temp_params['u_c'],
