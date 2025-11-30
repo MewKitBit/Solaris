@@ -42,11 +42,17 @@ class ModuleSource(Enum):
     CEC = 'CECMod'
     SANDIA = 'SandiaMod'
 
+class SingleDiodeMethod(Enum):
+    """Valid single diode resolution methods for PVLib"""
+    LAMBERTW = 'lambertw',
+    NEWTON = 'newton',
+    BRENTQ = 'brentq'
+
 class IdealOutputGenerator :
     """Calculates the 'ideal' power for one module."""
     def __init__(self, location: Location, azimuth: float, tilt: float, temp_model: TemperatureModel,
                  irradiance_model: IrradianceModel, albedo: float, module: str = None,
-                 module_source: ModuleSource = None):
+                 module_source: ModuleSource = None, single_diode_method: SingleDiodeMethod = None):
         """
         Creates a new instance of IdealOutputGenerator with the given parameters. IdealOutputGenerator can either
         represent an ideal panel with a max wattage and set gamma_pcd or use a defined module in the CEC or Sandia
@@ -77,6 +83,9 @@ class IdealOutputGenerator :
 
         module_source : ModuleSource, optional
             The database containing the module, if one is defined.
+
+        single_diode_method : SingleDiodeMethod, optional
+            The method used to solve the single diode equation (used for CEC modules) and obtain the IV curve.
         """
         self.location = location
         self.azimuth = azimuth
@@ -87,6 +96,7 @@ class IdealOutputGenerator :
         self.albedo = albedo
         self.module = module
         self.module_source = module_source
+        self.sd_method = single_diode_method
 
         # Load module if defined
         if module_source is ModuleSource.SANDIA:
@@ -278,8 +288,8 @@ class IdealOutputGenerator :
             saturation_current=i0,
             resistance_series=rs,
             resistance_shunt=rsh,
-            nNsVth=nNsVth
-            # TODO: accept different methods of resolution
+            nNsVth=nNsVth,
+            method=self.sd_method,
         )
 
         return full_results
