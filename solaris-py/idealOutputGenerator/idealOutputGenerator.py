@@ -4,12 +4,21 @@ from pvlib import pvsystem, irradiance, temperature, solarposition, atmosphere, 
 from pvlib.location import Location
 from pvlib.temperature import TEMPERATURE_MODEL_PARAMETERS
 
-# TODO: Add logging to the generator
 import logging
 logger = logging.getLogger("idealOutputGenerator")
 
 class TemperatureModel(Enum):
-    """Valid temperature models for PVLib"""
+    """
+    Valid temperature models for PVLib
+
+    Notes
+    -----
+        The SAPM and PVSyst models produce different parameters, which is important if treated outside the
+        scope of this class.
+    See Also
+    --------
+        pvlib.temperature.TEMPERATURE_MODEL_PARAMETERS
+    """
     SAPM_OPEN_RACK_GLASS = TEMPERATURE_MODEL_PARAMETERS['sapm']['open_rack_glass_glass']
     SAPM_CLOSE_MOUNT_GLASS = TEMPERATURE_MODEL_PARAMETERS['sapm']['close_mount_glass_glass']
     SAPM_OPEN_RACK_POLYMER = TEMPERATURE_MODEL_PARAMETERS['sapm']['open_rack_glass_polymer']
@@ -38,6 +47,37 @@ class IdealOutputGenerator :
     def __init__(self, location: Location, azimuth: float, tilt: float, temp_model: TemperatureModel,
                  irradiance_model: IrradianceModel, albedo: float, module: str = None,
                  module_source: ModuleSource = None):
+        """
+        Creates a new instance of IdealOutputGenerator with the given parameters. IdealOutputGenerator can either
+        represent an ideal panel with a max wattage and set gamma_pcd or use a defined module in the CEC or Sandia
+        databases.
+
+        Parameters
+        ----------
+        location : Location
+            The physical location of the module given by its coordinates. Uses the Location class from ``pvlib.location``
+
+        azimuth : float
+            The azimuth angle of the module.
+
+        tilt : float
+            The tilt angle of the module.
+
+        temp_model : TemperatureModel
+            The temperature model to be used for the module.
+
+        irradiance_model : IrradianceModel
+            The irradiance model to be used.
+
+        albedo : float
+            Amount of albedo at the given location.
+
+        module : str, optional
+            The name of the module to load from the databases, if any.
+
+        module_source : ModuleSource, optional
+            The database containing the module, if one is defined.
+        """
         self.location = location
         self.azimuth = azimuth
         self.tilt = tilt
@@ -59,10 +99,12 @@ class IdealOutputGenerator :
         elif module_source is ModuleSource.CEC:
             cec_modules_db = pvsystem.retrieve_sam(ModuleSource.CEC.value)
             if module in cec_modules_db.keys():
-                logger.debug(f'Loaded CEC module {module}')
+                logger.info(f'Loaded CEC module {module}')
                 self.module = cec_modules_db[module]
             else:
                 logger.error(f'No CEC module {module}, none loaded')
+        else:
+            logger.info(f'No module source was provided, assuming ideal module')
 
         # State storage
         self.output_file = None
@@ -72,25 +114,25 @@ class IdealOutputGenerator :
         self.cell_temperature = None
         self.ideal_power = None
 
-    def __complete_weather(self):
+    def __complete_sim_params(self):
         """
-        Adds the following values to the weather dataframe if not present:
-            - dni_extra
-            - airmass
-            - am_abs
+        Adds the following values to the sim_parameters dataframe if not present:
+            - dni_extra: Extraterrestrial radiation (W/m^2). Solar irradiance at the top of the atmosphere.
+            - airmass: Relative airmass (unitless). The optical path length through the atmosphere relative to the zenith path.
+            - am_abs: Absolute airmass (unitless). Relative airmass corrected for local atmospheric pressure.
         """
         if 'dni_extra' not in self.sim_parameters.columns:
             dni_extra = irradiance.get_extra_radiation(self.sim_parameters.index)
             self.sim_parameters['dni_extra'] = dni_extra
-            logger.info(f'Adding dni_extra column')
+            logger.info(f'Added dni_extra column')
         if 'airmass' not in self.sim_parameters.columns:
             airmass = atmosphere.get_relative_airmass(self.solar_pos['apparent_zenith'])
             self.sim_parameters['airmass'] = airmass
-            logger.info(f'Adding airnass column')
+            logger.info(f'Added airmass column')
         if 'am_abs' not in self.sim_parameters.columns:
             am_abs = atmosphere.get_absolute_airmass(self.sim_parameters['airmass'], self.sim_parameters['pressure'])
             self.sim_parameters['am_abs'] = am_abs
-            logger.info(f'Adding am_abs column')
+            logger.info(f'Added am_abs column')
 
     def __operate_common_data(self, weather: DataFrame, output_file: str):
         if not output_file.endswith(".csv"):
@@ -114,8 +156,8 @@ class IdealOutputGenerator :
             pressure=self.sim_parameters["pressure"],
         )
 
-        # Calculate extra weather parameters if not available
-        self.__complete_weather()
+        # Calculate extra simulation parameters if not available
+        self.__complete_sim_params()
 
         # Assign total irradiance
         total_irradiance = irradiance.get_total_irradiance(
@@ -162,7 +204,7 @@ class IdealOutputGenerator :
 
     def generate_ideal_output(self, weather: DataFrame, output_file: str, max_wattage: float, gamma_pdc: float):
         """
-        Runs the core physics using the provided weather and solpos dataframes.
+        Runs the core physics assuming an ideal panel.
 
         Args:
             weather (Series): Weather data series.
@@ -237,6 +279,7 @@ class IdealOutputGenerator :
             resistance_series=rs,
             resistance_shunt=rsh,
             nNsVth=nNsVth
+            # TODO: accept different methods of resolution
         )
 
         return full_results
@@ -253,7 +296,7 @@ class IdealOutputGenerator :
 
     def generate_module_output(self, weather: DataFrame, output_file: str):
         """
-        Runs the core physics using the provided weather and solpos dataframes.
+        Runs the core physics using the loaded module.
 
         Args:
             weather (Series): Weather data series.
@@ -264,8 +307,12 @@ class IdealOutputGenerator :
         if self.module_source is ModuleSource.CEC:
             full_results = self.__generate_cec_output()
 
-        else:
+        elif self.module_source is ModuleSource.SANDIA:
             full_results = self.__generate_sapm_output()
+
+        else:
+            logger.error(f"Unknown module source: {self.module_source}")
+            return
 
         self.ideal_power = full_results['p_mp']
 
