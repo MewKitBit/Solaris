@@ -322,10 +322,8 @@ class IdealOutputGenerator :
             logger.error(f"Unknown module source: {self.module_source}")
             return
 
-        self.ideal_power = full_results['p_mp']
-
         # Save to file
-        self.ideal_power.to_csv(
+        full_results.to_csv(
             output_file,
             header=True,
         )
